@@ -301,7 +301,7 @@ var ClientMessageBroker = /** @class */ (function () {
         else {
             promise = null;
         }
-        var message = {
+        var message  = {
             'method': args.method,
             'args': fnArgs,
         };
@@ -365,8 +365,13 @@ var PostMessageBusSink = /** @class */ (function () {
     PostMessageBusSink.prototype.attachToZone = function (zone) {
         var _this = this;
         this._zone = zone;
-        this._zone.runOutsideAngular(function () { _this._zone.onStable.subscribe({ next: function () { _this._handleOnEventDone(); } }); });
+        this._zone.runOutsideAngular(function () { _this.zoneSubscription = _this._zone.onStable.subscribe({ next: function () { _this._handleOnEventDone(); } }); });
     };
+    PostMessageBusSink.prototype.destroy = function (zone) {
+        var _this = this;
+        _this.zoneSubscription.unsubscribe();
+    };
+    PostMessageBusSink.prototype.zoneSubscription = null;
     PostMessageBusSink.prototype.initChannel = function (channel, runInZone) {
         var _this = this;
         if (runInZone === void 0) { runInZone = true; }
@@ -407,15 +412,23 @@ var PostMessageBusSource = /** @class */ (function () {
     function PostMessageBusSource(eventTarget) {
         var _this = this;
         this._channels = {};
+        _this.onMessage = function(ev) { return _this._handleMessages(ev); };
         if (eventTarget) {
-            eventTarget.addEventListener('message', function (ev) { return _this._handleMessages(ev); });
+            eventTarget.addEventListener('message', _this.onMessage);
         }
         else {
             // if no eventTarget is given we assume we're in a WebWorker and listen on the global scope
             var workerScope = self;
-            workerScope.addEventListener('message', function (ev) { return _this._handleMessages(ev); });
+            workerScope.addEventListener('message', _this.onMessage);
         }
     }
+    PostMessageBusSource.prototype.onMessage = null;
+    PostMessageBusSource.prototype.destroy = function() {
+        var _this = this;
+        var workerScope = self;
+        workerScope.removeEventListener('message', _this.onMessage);
+    }
+    PostMessageBusSource.prototype.messageListener = null;
     PostMessageBusSource.prototype.attachToZone = function (zone) { this._zone = zone; };
     PostMessageBusSource.prototype.initChannel = function (channel, runInZone) {
         if (runInZone === void 0) { runInZone = true; }
@@ -1738,14 +1751,20 @@ var ɵ0 = function (message, transferrables) {
     postMessage(message, transferrables);
 };
 // TODO(jteplitz602): remove this and compile with lib.webworker.d.ts (#3492)
-var _postMessage = {
+var _postMessage  = {
     postMessage: ɵ0
 };
+var old = null;
 function createMessageBus(zone) {
+	if(old) {
+		old.sink.destroy();
+		old.source.destroy();
+	}
     var sink = new PostMessageBusSink(_postMessage);
     var source = new PostMessageBusSource();
     var bus = new PostMessageBus(sink, source);
     bus.attachToZone(zone);
+    old = bus;
     return bus;
 }
 function setupWebWorker() {
